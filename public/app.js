@@ -1,64 +1,163 @@
 document.addEventListener('DOMContentLoaded', () => {
-  // --- Tab Elements ---
-  const tabBtns = document.querySelectorAll('.tab-btn');
-  const tabContents = document.querySelectorAll('.tab-content');
+  const setupCard = document.getElementById('setupCard');
+  const questionCard = document.getElementById('questionCard');
+  const jobDescriptionEl = document.getElementById('jobDescription');
+  const startSetupBtn = document.getElementById('startSetupBtn');
 
-  // --- Log Visit Elements ---
+  const questionCategoryEl = document.getElementById('questionCategory');
+  const questionTextEl = document.getElementById('questionText');
+  const followUpBadge = document.getElementById('followUpBadge');
   const recordBtn = document.getElementById('recordBtn');
   const statusEl = document.getElementById('status');
-  const visitTypeSelect = document.getElementById('visitType');
-  const successCard = document.getElementById('successCard');
-  const successDetails = document.getElementById('successDetails');
+  const waveformCanvas = document.getElementById('waveformCanvas');
+  const canvasCtx = waveformCanvas.getContext('2d');
+  
+  const progressText = document.getElementById('progressText');
+  const progressBar = document.getElementById('progressBar');
+  
+  const feedbackCard = document.getElementById('feedbackCard');
+  const transcriptDisplay = document.getElementById('transcriptDisplay');
+  const specificityBar = document.getElementById('specificityBar');
+  const specificityLabel = document.getElementById('specificityLabel');
+  const relevanceBar = document.getElementById('relevanceBar');
+  const relevanceLabel = document.getElementById('relevanceLabel');
+  const structureBar = document.getElementById('structureBar');
+  const structureLabel = document.getElementById('structureLabel');
+  const feedbackList = document.getElementById('feedbackList');
+  const rewriteSection = document.getElementById('rewriteSection');
+  const rewriteText = document.getElementById('rewriteText');
+  
+  const agentTraceSection = document.getElementById('agentTraceSection');
+  const agentFiredList = document.getElementById('agentFiredList');
+  const agentReasoningText = document.getElementById('agentReasoningText');
 
-  // --- History Elements ---
-  const historyListEl = document.getElementById('historyList');
-  const anomalyPlaceholder = document.getElementById('anomalyContainerPlaceholder');
-
-  // --- Digest Elements ---
-  const supervisorBtn = document.getElementById('supervisorRefreshBtn');
-  const supervisorStatus = document.getElementById('supervisorStatus');
-  const supervisorContent = document.getElementById('supervisorContent');
-
-  const phcBtn = document.getElementById('phcRefreshBtn');
-  const phcStatus = document.getElementById('phcStatus');
-  const phcContent = document.getElementById('phcContent');
+  const nextBtn = document.getElementById('nextBtn');
+  const continueBtn = document.getElementById('continueBtn');
+  
+  // Completion Card Elements
+  const completionCard = document.getElementById('completionCard');
+  const avgSpecBar = document.getElementById('avgSpecBar');
+  const avgSpecLabel = document.getElementById('avgSpecLabel');
+  const avgRelBar = document.getElementById('avgRelBar');
+  const avgRelLabel = document.getElementById('avgRelLabel');
+  const avgStructBar = document.getElementById('avgStructBar');
+  const avgStructLabel = document.getElementById('avgStructLabel');
+  const weakestAreaLabel = document.getElementById('weakestAreaLabel');
+  const perQuestionList = document.getElementById('perQuestionList');
+  const practiceAgainBtn = document.getElementById('practiceAgainBtn');
+  const aiSummarySection = document.getElementById('aiSummarySection');
+  const aiSummaryText = document.getElementById('aiSummaryText');
 
   let mediaRecorder;
   let audioChunks = [];
   let isRecording = false;
+  let liveAudioCtx;
+  let analyser;
 
-  // --- Tab Switching Logic ---
-  function handleHashChange() {
-    let hash = window.location.hash || '#/log';
-    
-    // Deactivate all
-    tabBtns.forEach(b => b.classList.remove('active'));
-    tabContents.forEach(c => c.classList.remove('active'));
-    
-    // Find matching button
-    let activeBtn = Array.from(tabBtns).find(b => b.getAttribute('href') === hash);
-    if (!activeBtn) {
-      activeBtn = tabBtns[0]; // fallback to first tab
-      hash = activeBtn.getAttribute('href');
-    }
-    
-    // Activate clicked
-    activeBtn.classList.add('active');
-    const targetId = activeBtn.getAttribute('data-tab');
-    document.getElementById(targetId).classList.add('active');
+  let questions = [];
+  let currentQuestionIndex = 0;
+  
+  // Follow-up state
+  let isFollowUpPhase = false;
+  let currentTranscript = "";
+  
+  // Session results for completion screen
+  let sessionResults = [];
 
-    // Fetch fresh data when switching to specific tabs
-    if (targetId === 'tab-history') {
-      fetchAndRenderVisits();
-      fetchAndRenderAnomalies();
-    } else if (targetId === 'tab-supervisor') {
-      fetchSupervisorDigest();
-    } else if (targetId === 'tab-phc') {
-      fetchPhcDigest();
+  startSetupBtn.addEventListener('click', async () => {
+    const jobDescription = jobDescriptionEl.value.trim();
+    startSetupBtn.disabled = true;
+    startSetupBtn.textContent = "Starting...";
+
+    try {
+      if (jobDescription) {
+        startSetupBtn.innerHTML = '<span class="spinner"></span> Generating tailored questions...';
+        const response = await fetch('/api/interview/generate-questions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobDescription })
+        });
+        questions = await response.json();
+      } else {
+        // Fallback to static if empty
+        const response = await fetch('/api/interview/questions');
+        questions = await response.json();
+      }
+
+      setupCard.style.display = 'none';
+      completionCard.style.display = 'none';
+      questionCard.style.display = 'block';
+
+      if (questions.length > 0) {
+        showQuestion(0);
+        recordBtn.disabled = false;
+      } else {
+        questionTextEl.textContent = "No questions found.";
+      }
+    } catch (err) {
+      console.error(err);
+      startSetupBtn.textContent = "Error! Try again.";
+      startSetupBtn.disabled = false;
     }
+  });
+
+  function showQuestion(index) {
+    if (index >= questions.length) {
+      showCompletionScreen();
+      return;
+    }
+    currentQuestionIndex = index;
+    const q = questions[index];
+    
+    // Reset state for new base question
+    isFollowUpPhase = false;
+    currentTranscript = "";
+    
+    questionCategoryEl.textContent = `Category: ${q.category}`;
+    questionTextEl.textContent = q.text;
+    followUpBadge.style.display = 'none';
+    
+    // Update Progress
+    const total = questions.length;
+    progressText.textContent = `Question ${index + 1} of ${total}`;
+    progressBar.style.width = `${((index + 1) / total) * 100}%`;
+    
+    // Reset UI
+    feedbackCard.style.display = 'none';
+    waveformCanvas.style.display = 'none';
+    statusEl.textContent = "Ready";
+    statusEl.style.display = 'block';
   }
 
-  window.addEventListener('hashchange', handleHashChange);
+  nextBtn.addEventListener('click', () => {
+    showQuestion(currentQuestionIndex + 1);
+  });
+
+  continueBtn.addEventListener('click', async () => {
+    try {
+      feedbackCard.style.display = 'none';
+
+      const followUpQuestionText = window.currentFollowUpQuestion || "Could you tell me more about that?";
+
+      // Enter follow-up phase
+      isFollowUpPhase = true;
+      questionTextEl.textContent = followUpQuestionText;
+      followUpBadge.style.display = 'inline-block';
+      
+      // Update Progress text for follow-up
+      const total = questions.length;
+      progressText.textContent = `Question ${currentQuestionIndex + 1} of ${total} (Follow-up)`;
+      
+      waveformCanvas.style.display = 'none';
+      statusEl.textContent = "Ready";
+      recordBtn.disabled = false;
+
+    } catch (error) {
+      console.error("Follow-up error:", error);
+      statusEl.textContent = "Error: " + error.message;
+      recordBtn.disabled = false;
+    }
+  });
 
   // --- Recording Logic ---
   recordBtn.addEventListener('click', async () => {
@@ -71,12 +170,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function startRecording() {
     try {
-      successCard.style.display = 'none'; // Hide any previous success
-      statusEl.textContent = ""; // Clear any previous error
+      feedbackCard.style.display = 'none';
+      statusEl.style.display = 'block';
+      statusEl.textContent = ""; 
+      
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       // Brief delay to prevent mic initialization lag from clipping the first word
       await new Promise(resolve => setTimeout(resolve, 400));
+      
+      // Setup live audio visualization
+      liveAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = liveAudioCtx.createMediaStreamSource(stream);
+      analyser = liveAudioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
       
       mediaRecorder = new MediaRecorder(stream);
       audioChunks = [];
@@ -90,13 +198,21 @@ document.addEventListener('DOMContentLoaded', () => {
       mediaRecorder.onstop = handleStop;
       mediaRecorder.start();
       isRecording = true;
+      
+      // Start visualization
+      waveformCanvas.style.display = 'block';
+      drawWaveform();
+
       recordBtn.textContent = "Stop Recording";
       recordBtn.classList.replace('primary', 'danger');
       statusEl.textContent = "Recording...";
       statusEl.classList.add('recording');
     } catch (err) {
       console.error("Error accessing microphone:", err);
-      statusEl.textContent = "Error: Cannot access microphone";
+      statusEl.textContent = "Error: Microphone access denied. Please allow microphone permissions and try again.";
+      recordBtn.disabled = false;
+      recordBtn.textContent = "Start Recording";
+      recordBtn.classList.replace('danger', 'primary');
     }
   }
 
@@ -106,15 +222,41 @@ document.addEventListener('DOMContentLoaded', () => {
       mediaRecorder.stream.getTracks().forEach(track => track.stop());
     }
     isRecording = false;
+    
+    if (liveAudioCtx && liveAudioCtx.state !== 'closed') {
+      liveAudioCtx.close();
+    }
+    
     recordBtn.textContent = "Start Recording";
     recordBtn.classList.replace('danger', 'primary');
-    statusEl.textContent = "Processing audio...";
+    statusEl.innerHTML = '<span class="spinner"></span> Processing audio... (This may take a moment)';
     statusEl.classList.remove('recording');
+  }
+
+  function drawWaveform() {
+    if (!isRecording) return; // Freezes the canvas state when false
+    requestAnimationFrame(drawWaveform);
+    
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    analyser.getByteFrequencyData(dataArray);
+    
+    canvasCtx.fillStyle = getComputedStyle(document.body).getPropertyValue('--paper') || '#F6F4EE';
+    canvasCtx.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+    
+    const barWidth = (waveformCanvas.width / bufferLength) * 2.5;
+    let x = 0;
+    
+    for(let i = 0; i < bufferLength; i++) {
+      const barHeight = dataArray[i] / 2;
+      canvasCtx.fillStyle = getComputedStyle(document.body).getPropertyValue('--teal') || '#4a7b76';
+      canvasCtx.fillRect(x, waveformCanvas.height - barHeight, barWidth, barHeight);
+      x += barWidth + 1;
+    }
   }
 
   async function handleStop() {
     const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-    const visitType = visitTypeSelect.value;
     
     try {
       const arrayBuffer = await audioBlob.arrayBuffer();
@@ -132,7 +274,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (rms < 0.01) {
         statusEl.style.display = 'block';
         statusEl.textContent = "Error: Audio too short or empty — please record a longer message.";
-        successCard.style.display = 'none';
         return; // Abort upload
       }
     } catch (err) {
@@ -141,274 +282,208 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const formData = new FormData();
     formData.append('audio', audioBlob, 'recording.webm');
-    formData.append('visitType', visitType);
+    
+    // Always pass the current question text so the backend doesn't need to look it up 
+    // (which fails for dynamically generated questions)
+    formData.append('questionText', questionTextEl.textContent);
+    formData.append('isFollowUp', isFollowUpPhase.toString());
 
     try {
-      const response = await fetch('/api/visits/audio', {
+      const response = await fetch('/api/interview/answer', {
         method: 'POST',
         body: formData
       });
       
-      const data = await response.json();
+      const result = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.message || data.error || 'Upload failed');
+        throw new Error(result.message || result.error || 'Upload failed');
       }
 
-      // Log the full JSON for debugging as requested
-      console.log("=== Raw JSON Response ===");
-      console.log(JSON.stringify(data, null, 2));
-      console.log("=========================");
+      const data = result.data;
+      
+      statusEl.style.display = 'none';
+      
+      if (!isFollowUpPhase) {
+        currentTranscript = data.transcript;
+      }
+      
+      // Update UI with response
+      transcriptDisplay.textContent = `"${data.transcript}"`;
+      
+      const specPct = Math.round((data.specificityScore || 0) * 100);
+      specificityBar.style.width = `${specPct}%`;
+      specificityLabel.textContent = `${specPct}%`;
+      
+      const relPct = Math.round((data.relevanceScore || 0) * 100);
+      relevanceBar.style.width = `${relPct}%`;
+      relevanceLabel.textContent = `${relPct}%`;
+      
+      const structPct = Math.round((data.structureScore || 0) * 100);
+      structureBar.style.width = `${structPct}%`;
+      structureLabel.textContent = `${structPct}%`;
 
-      statusEl.textContent = "Done!";
+      // Save to session results
+      sessionResults.push({
+        category: questions[currentQuestionIndex].category,
+        isFollowUp: isFollowUpPhase,
+        transcript: data.transcript,
+        specPct,
+        relPct,
+        structPct
+      });
       
-      // Construct professional success details string
-      let beneficiaryName = "Unknown Beneficiary";
-      let zoneText = "";
-      
-      if (data.extracted_fields) {
-        beneficiaryName = data.extracted_fields.beneficiary_name || beneficiaryName;
-        if (data.extracted_fields.zone) {
-          zoneText = ` • ${data.extracted_fields.zone}`;
+      feedbackList.innerHTML = '';
+      if (data.feedback && Array.isArray(data.feedback)) {
+        data.feedback.forEach(point => {
+          const li = document.createElement('li');
+          li.textContent = point;
+          feedbackList.appendChild(li);
+        });
+      }
+
+      if (data.modelRewrite && data.modelRewrite.trim() !== '') {
+        rewriteText.textContent = data.modelRewrite;
+        rewriteSection.style.display = 'block';
+        rewriteSection.removeAttribute('open'); // start collapsed
+      } else {
+        rewriteSection.style.display = 'none';
+      }
+
+      if (data.orchestratorReasoning) {
+        agentTraceSection.style.display = 'block';
+        agentTraceSection.removeAttribute('open');
+        const firedAgents = ['EvaluatorAgent', 'CoachAgent'];
+        if (data.askFollowUp) {
+          firedAgents.push('InterviewerAgent');
+        }
+        agentFiredList.innerHTML = `<strong>Agents Fired:</strong> ${firedAgents.join(', ')}`;
+        agentReasoningText.innerHTML = `<strong>Reasoning:</strong> ${data.orchestratorReasoning}`;
+      } else {
+        agentTraceSection.style.display = 'none';
+      }
+
+      // Save current followUpQuestion if needed
+      if (data.askFollowUp && data.followUpQuestion) {
+        window.currentFollowUpQuestion = data.followUpQuestion;
+      } else {
+        window.currentFollowUpQuestion = "";
+      }
+
+      // Toggle Continue vs Next Question button
+      if (isFollowUpPhase) {
+        continueBtn.style.display = 'none';
+        nextBtn.style.display = 'inline-block';
+      } else {
+        if (data.askFollowUp === true) {
+          continueBtn.style.display = 'inline-block';
+          nextBtn.style.display = 'none';
+        } else {
+          continueBtn.style.display = 'none';
+          nextBtn.style.display = 'inline-block';
         }
       }
 
-      const formattedType = formatVisitType(data.visit_type || visitType);
-      successDetails.textContent = `${beneficiaryName} • ${formattedType}${zoneText}`;
-      successCard.style.display = 'block';
-      statusEl.style.display = 'none'; // Hide status text when showing success card
-      
-      // Also update history in the background so it's ready
-      fetchAndRenderVisits();
-      fetchAndRenderAnomalies();
+      feedbackCard.style.display = 'block';
       
     } catch (error) {
       console.error("Upload error:", error);
       statusEl.style.display = 'block';
-      statusEl.textContent = "Error: " + error.message;
-      successCard.style.display = 'none'; // Explicitly hide success card on error
+      statusEl.textContent = "Network error: " + error.message + ". Please check your connection and try again.";
+      recordBtn.textContent = "Retry Recording";
     }
   }
 
-  // --- Utility Functions ---
-  function formatRelativeTime(isoString) {
-    const date = new Date(isoString);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffSecs = Math.round(diffMs / 1000);
-    const diffMins = Math.round(diffSecs / 60);
-    const diffHours = Math.round(diffMins / 60);
-    const diffDays = Math.round(diffHours / 24);
+  function showCompletionScreen() {
+    questionCard.style.display = 'none';
+    feedbackCard.style.display = 'none';
+    completionCard.style.display = 'block';
+    
+    if (sessionResults.length === 0) return;
 
-    if (diffSecs < 60) return "Just now";
-    if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
-    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    if (diffDays === 1) return "Yesterday";
-    if (diffDays < 7) return `${diffDays} days ago`;
-    return date.toLocaleDateString();
-  }
+    let totalSpec = 0, totalRel = 0, totalStruct = 0;
+    
+    perQuestionList.innerHTML = '';
 
-  function formatVisitType(typeStr) {
-    if (!typeStr) return "Visit";
-    return typeStr
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-  }
+    sessionResults.forEach((result, idx) => {
+      totalSpec += result.specPct;
+      totalRel += result.relPct;
+      totalStruct += result.structPct;
 
-  // --- Data Fetching (History & Anomalies) ---
-  async function fetchAndRenderVisits() {
-    try {
-      const response = await fetch('/api/visits');
-      if (!response.ok) throw new Error("Failed to fetch visits");
-      let visits = await response.json();
+      const item = document.createElement('div');
+      item.style.border = '1px solid var(--border-color)';
+      item.style.padding = '1rem';
+      item.style.borderRadius = '8px';
+      item.style.background = 'var(--surface-color)';
       
-      visits.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      const title = result.isFollowUp ? `${result.category} (Follow-up)` : result.category;
       
-      if (visits.length === 0) {
-        historyListEl.innerHTML = `
-          <div class="empty-state">
-            <p>No visits logged yet — record your first one in the Log Visit tab!</p>
-          </div>
-        `;
-        return;
+      item.innerHTML = `
+        <div style="font-weight: 600; margin-bottom: 0.5rem;">${idx + 1}. ${title}</div>
+        <div style="display: flex; gap: 1rem; font-size: 0.9rem; color: var(--muted-text);">
+          <span>Spec: ${result.specPct}%</span>
+          <span>Rel: ${result.relPct}%</span>
+          <span>STAR: ${result.structPct}%</span>
+        </div>
+      `;
+      perQuestionList.appendChild(item);
+    });
+
+    const avgSpec = Math.round(totalSpec / sessionResults.length);
+    const avgRel = Math.round(totalRel / sessionResults.length);
+    const avgStruct = Math.round(totalStruct / sessionResults.length);
+
+    avgSpecBar.style.width = `${avgSpec}%`;
+    avgSpecLabel.textContent = `${avgSpec}%`;
+    avgRelBar.style.width = `${avgRel}%`;
+    avgRelLabel.textContent = `${avgRel}%`;
+    avgStructBar.style.width = `${avgStruct}%`;
+    avgStructLabel.textContent = `${avgStruct}%`;
+
+    // Find weakest
+    const scores = [
+      { name: 'Specificity', val: avgSpec },
+      { name: 'Relevance', val: avgRel },
+      { name: 'Structure (STAR)', val: avgStruct }
+    ];
+    scores.sort((a, b) => a.val - b.val);
+    const weakest = scores[0];
+    
+    weakestAreaLabel.textContent = `Focus Area: ${weakest.name} was your lowest-scoring area this session (${weakest.val}%).`;
+
+    // Async call for AI Summary (Stretch Goal)
+    aiSummarySection.style.display = 'none';
+    aiSummaryText.textContent = '';
+    
+    fetch('/api/interview/summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionResults })
+    })
+    .then(res => {
+      if (!res.ok) throw new Error("Summary failed");
+      return res.json();
+    })
+    .then(data => {
+      if (data && data.summary) {
+        aiSummaryText.textContent = data.summary;
+        aiSummarySection.style.display = 'block';
       }
-
-      historyListEl.innerHTML = '';
-      
-      visits.forEach(visit => {
-        const isComplete = visit.status === 'complete';
-        const card = document.createElement('div');
-        card.className = 'visit-card';
-        
-        const header = document.createElement('div');
-        header.className = 'visit-header';
-        
-        const titleContainer = document.createElement('div');
-        const title = document.createElement('h3');
-        title.className = 'visit-title';
-        title.textContent = formatVisitType(visit.visitType || visit.visit_type || 'General Visit');
-        
-        const time = document.createElement('div');
-        time.className = 'visit-time';
-        time.textContent = formatRelativeTime(visit.timestamp);
-        
-        titleContainer.appendChild(title);
-        titleContainer.appendChild(time);
-        
-        const pill = document.createElement('span');
-        pill.className = `pill ${isComplete ? 'complete' : 'incomplete'}`;
-        pill.textContent = isComplete ? 'Complete' : 'Incomplete';
-        
-        header.appendChild(titleContainer);
-        header.appendChild(pill);
-        card.appendChild(header);
-        
-        if (visit.transcript) {
-          const transcriptEl = document.createElement('div');
-          transcriptEl.className = 'visit-transcript clickable';
-          const fullText = visit.transcript;
-          const isLong = fullText.length > 100;
-          const truncated = isLong ? fullText.substring(0, 100) + '...' : fullText;
-          
-          transcriptEl.textContent = truncated;
-          if (isLong) {
-            transcriptEl.addEventListener('click', () => {
-              transcriptEl.textContent = transcriptEl.textContent === truncated ? fullText : truncated;
-            });
-          } else {
-            transcriptEl.classList.remove('clickable');
-          }
-          card.appendChild(transcriptEl);
-        }
-        
-        if (visit.extracted_fields && Object.keys(visit.extracted_fields).length > 0) {
-          const chipsContainer = document.createElement('div');
-          chipsContainer.className = 'chips-container';
-          
-          Object.entries(visit.extracted_fields).forEach(([key, value]) => {
-            if (value !== null && value !== '') {
-              const chip = document.createElement('span');
-              chip.className = 'chip';
-              chip.textContent = `${formatVisitType(key)}: ${value}`;
-              chipsContainer.appendChild(chip);
-            }
-          });
-          card.appendChild(chipsContainer);
-        }
-        
-        if (!isComplete && visit.missing_fields && visit.missing_fields.length > 0) {
-          const missingEl = document.createElement('div');
-          missingEl.className = 'missing-fields';
-          missingEl.textContent = `Missing: ${visit.missing_fields.map(formatVisitType).join(', ')}`;
-          card.appendChild(missingEl);
-        }
-        
-        historyListEl.appendChild(card);
-      });
-      
-    } catch (error) {
-      console.error("Error fetching visits:", error);
-      historyListEl.innerHTML = `<p style="color:red">Error loading visit history.</p>`;
-    }
+    })
+    .catch(err => {
+      console.warn("AI Summary stretch goal failed gracefully:", err);
+    });
   }
 
-  async function fetchAndRenderAnomalies() {
-    try {
-      const response = await fetch('/api/anomalies');
-      if (!response.ok) return;
-      
-      const data = await response.json();
-      
-      let anomalyContainer = document.getElementById('anomalyContainer');
-      if (anomalyContainer) {
-        anomalyContainer.remove();
-      }
-
-      if (data.anomalyCount > 0) {
-        anomalyContainer = document.createElement('div');
-        anomalyContainer.id = 'anomalyContainer';
-        anomalyPlaceholder.parentNode.insertBefore(anomalyContainer, anomalyPlaceholder);
-        
-        const title = document.createElement('h3');
-        title.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: text-bottom; margin-right: 0.5rem;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>Detected Anomalies';
-        anomalyContainer.appendChild(title);
-        
-        data.anomalies.forEach(anomaly => {
-          const item = document.createElement('div');
-          item.className = 'anomaly-card';
-          item.textContent = anomaly.reason;
-          anomalyContainer.appendChild(item);
-        });
-      }
-    } catch (error) {
-      console.error("Error fetching anomalies:", error);
-    }
-  }
-
-  // --- Digest Logic ---
-  function parseMarkdownToHTML(text) {
-    if (!text) return "";
-    let html = text
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/\n/g, '<br>');
-    return html;
-  }
-
-  async function fetchSupervisorDigest() {
-    try {
-      supervisorStatus.textContent = "Loading digest...";
-      supervisorStatus.style.display = 'block';
-      supervisorContent.style.display = 'none';
-      if (supervisorBtn) supervisorBtn.disabled = true;
-      
-      const response = await fetch('/api/supervisor-digest');
-      const data = await response.json();
-      
-      if (!response.ok) throw new Error('Failed to fetch digest');
-      
-      supervisorStatus.style.display = 'none';
-      supervisorContent.innerHTML = parseMarkdownToHTML(data.digest);
-      supervisorContent.style.display = 'block';
-    } catch (err) {
-      console.error(err);
-      supervisorStatus.textContent = "Unable to load supervisor digest at this time. Please try again.";
-      supervisorStatus.style.display = 'block';
-      supervisorContent.style.display = 'none';
-    } finally {
-      if (supervisorBtn) supervisorBtn.disabled = false;
-    }
-  }
-
-  async function fetchPhcDigest() {
-    try {
-      phcStatus.textContent = "Loading digest...";
-      phcStatus.style.display = 'block';
-      phcContent.style.display = 'none';
-      if (phcBtn) phcBtn.disabled = true;
-      
-      const response = await fetch('/api/phc-digest');
-      const data = await response.json();
-      
-      if (!response.ok) throw new Error('Failed to fetch digest');
-      
-      phcStatus.style.display = 'none';
-      phcContent.innerHTML = parseMarkdownToHTML(data.digest);
-      phcContent.style.display = 'block';
-    } catch (err) {
-      console.error(err);
-      phcStatus.textContent = "Unable to load PHC zone digest at this time. Please try again.";
-      phcStatus.style.display = 'block';
-      phcContent.style.display = 'none';
-    } finally {
-      if (phcBtn) phcBtn.disabled = false;
-    }
-  }
-
-  if (supervisorBtn) supervisorBtn.addEventListener('click', fetchSupervisorDigest);
-  if (phcBtn) phcBtn.addEventListener('click', fetchPhcDigest);
-
-  // Initial load
-  handleHashChange();
+  practiceAgainBtn.addEventListener('click', () => {
+    // Reset state
+    sessionResults = [];
+    currentQuestionIndex = 0;
+    questions = [];
+    
+    completionCard.style.display = 'none';
+    setupCard.style.display = 'block';
+    startSetupBtn.disabled = false;
+    startSetupBtn.textContent = "Start Interview";
+  });
 });

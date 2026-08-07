@@ -1,7 +1,8 @@
 node_modules
 .env
-Dockerfile
-.dockerignore
 .git
-.github
+.gitignore
 README.md
+service-account-key.json
+local-db.json
+server/scripts/

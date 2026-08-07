@@ -1,10 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import visitsRouter from './routes/visits.js';
-import anomaliesRouter from './routes/anomalies.js';
-import supervisorRouter from './routes/supervisor.js';
-import phcRouter from './routes/phc.js';
+import interviewRouter from './routes/interview.js';
 
 // Environment Validation
 if (!process.env.GEMINI_API_KEY) {
@@ -25,10 +22,7 @@ app.get('/health', (req, res) => {
 });
 
 // API Routes
-app.use('/api/visits', visitsRouter);
-app.use('/api/anomalies', anomaliesRouter);
-app.use('/api/supervisor-digest', supervisorRouter);
-app.use('/api/phc-digest', phcRouter);
+app.use('/api/interview', interviewRouter);
 
 // Global Error Handler
 app.use((err, req, res, next) => {
