@@ -3,7 +3,7 @@ import multer from 'multer';
 import { evaluateAnswer, generateQuestions, generateSessionSummary, transcribeAudio, generateFollowUp } from '../services/gemini.js';
 import questions from '../config/questions.js';
 import { InMemoryRunner } from '@google/adk';
-import { orchestratorAgent } from '../agents/interview_agents.ts';
+import { orchestratorAgent } from '../agents/interview_agents.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
