@@ -216,6 +216,15 @@ select:focus, textarea:focus {
   box-shadow: var(--shadow-md);
 }
 
+.btn.secondary {
+  background-color: var(--line);
+  color: var(--text-color);
+}
+.btn.secondary:hover {
+  background-color: #c9c3b4;
+  box-shadow: var(--shadow-md);
+}
+
 .status {
   margin: 1rem 0;
   font-weight: 500;
