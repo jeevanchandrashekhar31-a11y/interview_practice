@@ -218,6 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
       waveformCanvas.style.display = 'none';
       statusEl.textContent = "Ready";
       recordBtn.disabled = false;
+      questionCard.style.display = 'block';
 
     } catch (error) {
       console.error("Follow-up error:", error);
