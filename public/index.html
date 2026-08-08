@@ -54,6 +54,7 @@
         <h2 id="questionText"></h2>
         
         <div style="margin-top: 2rem;">
+          <button id="prevBtn" class="btn secondary" style="padding: 1rem 1.5rem; font-size: 1.2rem; margin-right: 1rem; display: none;">Previous Question</button>
           <button id="recordBtn" class="btn primary" style="padding: 1rem 2.5rem; font-size: 1.2rem;">Start Recording</button>
           <div id="status" class="status" style="display: none;"></div>
           <canvas id="waveformCanvas" width="400" height="60" style="display: none; margin: 1rem auto 0;"></canvas>
@@ -155,6 +156,8 @@
         </details>
 
         <div style="text-align: right; margin-top: 2rem;">
+          <button id="feedbackPrevBtn" class="btn secondary" style="display: none; margin-right: 1rem;">Previous Question</button>
+          <button id="retryBtn" class="btn secondary" style="display: none; margin-right: 1rem; color: #dc2626; border-color: #dc2626;">Re-try Question</button>
           <button id="continueBtn" class="btn primary" style="margin-right: 1rem;">Continue</button>
           <button id="nextBtn" class="btn primary">Next Question</button>
         </div>

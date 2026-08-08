@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const questionTextEl = document.getElementById('questionText');
   const followUpBadge = document.getElementById('followUpBadge');
   const recordBtn = document.getElementById('recordBtn');
+  const prevBtn = document.getElementById('prevBtn');
   const statusEl = document.getElementById('status');
   const waveformCanvas = document.getElementById('waveformCanvas');
   const canvasCtx = waveformCanvas.getContext('2d');
@@ -52,6 +53,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const groundingAlert = document.getElementById('groundingAlert');
   const nextBtn = document.getElementById('nextBtn');
   const continueBtn = document.getElementById('continueBtn');
+  const feedbackPrevBtn = document.getElementById('feedbackPrevBtn');
+  const retryBtn = document.getElementById('retryBtn');
   
   // Completion Card Elements
   const completionCard = document.getElementById('completionCard');
@@ -85,6 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Session results for completion screen
   let sessionResults = [];
+  let feedbackCache = {};
   
   let selectedPersona = 'generic';
 
@@ -148,6 +152,12 @@ document.addEventListener('DOMContentLoaded', () => {
     progressText.textContent = `Question ${index + 1} of ${total}`;
     progressBar.style.width = `${((index + 1) / total) * 100}%`;
     
+    if (index > 0) {
+      prevBtn.style.display = 'inline-block';
+    } else {
+      prevBtn.style.display = 'none';
+    }
+    
     // Reset UI
     feedbackCard.style.display = 'none';
     waveformCanvas.style.display = 'none';
@@ -157,6 +167,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   nextBtn.addEventListener('click', () => {
     showQuestion(currentQuestionIndex + 1);
+  });
+
+  prevBtn.addEventListener('click', () => {
+    if (currentQuestionIndex > 0) {
+      showQuestion(currentQuestionIndex - 1);
+    }
+  });
+
+  feedbackPrevBtn.addEventListener('click', () => {
+    if (currentQuestionIndex > 0) {
+      showQuestion(currentQuestionIndex - 1);
+    }
+  });
+
+  retryBtn.addEventListener('click', () => {
+    // Clear history for this specific question
+    delete feedbackCache[currentQuestionIndex];
+    // We also need to remove it from sessionResults to prevent double-counting
+    // Find the entry that matches this index. For simplicity, we just filter it out based on the questionText.
+    // Actually, because follow-ups also get pushed, it's safer to remove all entries for this base question.
+    const qText = questions[currentQuestionIndex].text;
+    sessionResults = sessionResults.filter(r => r.questionText !== qText);
+    
+    // Show the recording screen again
+    showQuestion(currentQuestionIndex);
   });
 
   continueBtn.addEventListener('click', async () => {
@@ -338,154 +373,8 @@ document.addEventListener('DOMContentLoaded', () => {
       
       statusEl.style.display = 'none';
       
-      if (!isFollowUpPhase) {
-        currentTranscript = data.transcript;
-      }
-      
-      // Update UI with response
-      transcriptDisplay.textContent = `"${data.transcript}"`;
+      renderFeedback(data, false);
 
-      if (data.scorecardNote && data.scorecardNote.trim() !== '') {
-        scorecardNoteText.textContent = data.scorecardNote;
-        scorecardNoteContainer.style.display = 'block';
-      } else {
-        scorecardNoteContainer.style.display = 'none';
-      }
-
-      const specPct = Math.round((data.specificityScore || 0) * 100);
-      specificityBar.style.width = `${specPct}%`;
-      specificityLabel.textContent = `${specPct}%`;
-      
-      const relPct = Math.round((data.relevanceScore || 0) * 100);
-      relevanceBar.style.width = `${relPct}%`;
-      relevanceLabel.textContent = `${relPct}%`;
-      
-      const structPct = Math.round((data.structureScore || 0) * 100);
-      structureBar.style.width = `${structPct}%`;
-      structureLabel.textContent = `${structPct}%`;
-
-      wpmLabel.textContent = data.wpm || 0;
-      paceLabelText.textContent = data.paceLabel || 'optimal';
-      
-      fillerCountLabel.textContent = data.fillerCount || 0;
-      fillerRateLabel.textContent = data.fillerRate || 0;
-      fillerLabelText.textContent = data.fillerLabel || 'clean';
-
-      // Basic color hints
-      const paceColor = data.paceLabel === 'optimal' ? 'var(--primary-color)' : '#d97706';
-      wpmLabel.parentElement.style.color = paceColor;
-      paceLabelText.style.color = paceColor;
-
-      const fillerColor = data.fillerLabel === 'clean' ? 'var(--primary-color)' : (data.fillerLabel === 'noticeable' ? '#d97706' : '#dc2626');
-      fillerCountLabel.parentElement.style.color = fillerColor;
-      fillerRateLabel.parentElement.style.color = fillerColor;
-      fillerLabelText.style.color = fillerColor;
-
-      // Save to session results
-      sessionResults.push({
-        category: questions[currentQuestionIndex].category,
-        questionText: questionTextEl.textContent,
-        isFollowUp: isFollowUpPhase,
-        transcript: data.transcript,
-        specPct,
-        relPct,
-        structPct,
-        wpm: data.wpm || 0,
-        fillerRate: data.fillerRate || 0
-      });
-      
-      // Render alignment
-      if (data.alignmentLabel) {
-        alignmentLabelText.textContent = data.alignmentLabel;
-        alignmentExplanationText.textContent = data.alignmentExplanation;
-        alignmentContainer.style.display = 'block';
-      } else {
-        alignmentContainer.style.display = 'none';
-      }
-      
-      feedbackList.innerHTML = '';
-      if (data.feedback && Array.isArray(data.feedback)) {
-        data.feedback.forEach(point => {
-          const li = document.createElement('li');
-          li.textContent = point;
-          feedbackList.appendChild(li);
-        });
-      }
-
-      if (data.modelRewrite && data.modelRewrite.trim() !== '') {
-        rewriteText.textContent = data.modelRewrite;
-        rewriteSection.style.display = 'block';
-        rewriteSection.removeAttribute('open'); // start collapsed
-      } else {
-        rewriteSection.style.display = 'none';
-      }
-
-      if (data.contradictionFlag && data.contradictionNote) {
-        contradictionText.textContent = data.contradictionNote;
-        contradictionAlert.style.display = 'block';
-      } else {
-        contradictionAlert.style.display = 'none';
-      }
-
-      if (data.orchestratorReasoning || data.groundingPassed !== undefined || data.contradictionFlag !== undefined) {
-        agentTraceSection.style.display = 'block';
-        agentTraceSection.removeAttribute('open');
-        
-        if (data.orchestratorReasoning) {
-          const firedAgents = ['EvaluatorAgent', 'CoachAgent'];
-          if (data.askFollowUp) {
-            firedAgents.push('InterviewerAgent');
-          }
-          agentFiredList.innerHTML = `<strong>Agents Fired:</strong> ${firedAgents.join(', ')}`;
-          agentReasoningText.innerHTML = `<strong>Reasoning:</strong> ${data.orchestratorReasoning}`;
-        }
-
-        if (data.groundingPassed !== undefined) {
-          if (data.groundingPassed) {
-            groundingTraceText.innerHTML = `<strong>Grounding check:</strong> passed`;
-            groundingTraceText.style.color = 'inherit';
-          } else {
-            const claims = data.unsupportedClaims || [];
-            groundingTraceText.innerHTML = `<strong>Grounding check:</strong> flagged unsupported claims - [${claims.join(', ')}]`;
-            groundingTraceText.style.color = '#d97706'; // orange warning color
-          }
-          groundingTraceText.style.display = 'block';
-        } else {
-          groundingTraceText.style.display = 'none';
-        }
-
-        if (data.contradictionFlag !== undefined) {
-          contradictionTraceText.innerHTML = `<strong>Contradiction check:</strong> ${data.contradictionFlag ? `<span style="color: #dc2626;">flagged (${data.contradictionNote})</span>` : 'passed'}`;
-          contradictionTraceText.style.display = 'block';
-        } else {
-          contradictionTraceText.style.display = 'none';
-        }
-      } else {
-        agentTraceSection.style.display = 'none';
-      }
-
-      // Save current followUpQuestion if needed
-      if (data.askFollowUp && data.followUpQuestion) {
-        window.currentFollowUpQuestion = data.followUpQuestion;
-      } else {
-        window.currentFollowUpQuestion = "";
-      }
-
-      // Toggle Continue vs Next Question button
-      if (isFollowUpPhase) {
-        continueBtn.style.display = 'none';
-        nextBtn.style.display = 'inline-block';
-      } else {
-        if (data.askFollowUp === true) {
-          continueBtn.style.display = 'inline-block';
-          nextBtn.style.display = 'none';
-        } else {
-          continueBtn.style.display = 'none';
-          nextBtn.style.display = 'inline-block';
-        }
-      }
-
-      feedbackCard.style.display = 'block';
       
     } catch (error) {
       console.error("Upload error:", error);
