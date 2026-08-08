@@ -163,6 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
     waveformCanvas.style.display = 'none';
     statusEl.textContent = "Ready";
     statusEl.style.display = 'block';
+    questionCard.style.display = 'block';
   }
 
   nextBtn.addEventListener('click', () => {
