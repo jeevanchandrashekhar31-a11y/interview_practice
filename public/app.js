@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const setupCard = document.getElementById('setupCard');
   const questionCard = document.getElementById('questionCard');
   const jobDescriptionEl = document.getElementById('jobDescription');
+  const personaSelector = document.getElementById('personaSelector');
   const startSetupBtn = document.getElementById('startSetupBtn');
 
   const questionCategoryEl = document.getElementById('questionCategory');
@@ -16,7 +17,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const progressBar = document.getElementById('progressBar');
   
   const feedbackCard = document.getElementById('feedbackCard');
+  const contradictionAlert = document.getElementById('contradictionAlert');
+  const contradictionText = document.getElementById('contradictionText');
   const transcriptDisplay = document.getElementById('transcriptDisplay');
+  const scorecardNoteText = document.getElementById('scorecardNoteText');
+  const scorecardNoteContainer = document.getElementById('scorecardNoteContainer');
   const specificityBar = document.getElementById('specificityBar');
   const specificityLabel = document.getElementById('specificityLabel');
   const relevanceBar = document.getElementById('relevanceBar');
@@ -30,7 +35,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const agentTraceSection = document.getElementById('agentTraceSection');
   const agentFiredList = document.getElementById('agentFiredList');
   const agentReasoningText = document.getElementById('agentReasoningText');
+  const groundingTraceText = document.getElementById('groundingTraceText');
+  const contradictionTraceText = document.getElementById('contradictionTraceText');
 
+  const wpmLabel = document.getElementById('wpmLabel');
+  const paceLabelText = document.getElementById('paceLabelText');
+  const fillerCountLabel = document.getElementById('fillerCountLabel');
+  const fillerRateLabel = document.getElementById('fillerRateLabel');
+  const fillerLabelText = document.getElementById('fillerLabelText');
+
+  const alignmentContainer = document.getElementById('alignmentContainer');
+  const alignmentLabelText = document.getElementById('alignmentLabelText');
+  const alignmentExplanationText = document.getElementById('alignmentExplanationText');
+
+  // Grounding
+  const groundingAlert = document.getElementById('groundingAlert');
   const nextBtn = document.getElementById('nextBtn');
   const continueBtn = document.getElementById('continueBtn');
   
@@ -45,12 +64,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const weakestAreaLabel = document.getElementById('weakestAreaLabel');
   const perQuestionList = document.getElementById('perQuestionList');
   const practiceAgainBtn = document.getElementById('practiceAgainBtn');
+  const downloadCardBtn = document.getElementById('downloadCardBtn');
+  const shareCanvas = document.getElementById('shareCanvas');
   const aiSummarySection = document.getElementById('aiSummarySection');
   const aiSummaryText = document.getElementById('aiSummaryText');
 
   let mediaRecorder;
   let audioChunks = [];
   let isRecording = false;
+  let recordingStartTime = 0;
   let liveAudioCtx;
   let analyser;
 
@@ -63,9 +85,13 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Session results for completion screen
   let sessionResults = [];
+  
+  let selectedPersona = 'generic';
 
   startSetupBtn.addEventListener('click', async () => {
     const jobDescription = jobDescriptionEl.value.trim();
+    selectedPersona = personaSelector.value;
+    
     startSetupBtn.disabled = true;
     startSetupBtn.textContent = "Starting...";
 
@@ -75,7 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const response = await fetch('/api/interview/generate-questions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jobDescription })
+          body: JSON.stringify({ jobDescription, persona: selectedPersona })
         });
         questions = await response.json();
       } else {
@@ -196,6 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
       };
 
       mediaRecorder.onstop = handleStop;
+      recordingStartTime = Date.now();
       mediaRecorder.start();
       isRecording = true;
       
@@ -279,14 +306,21 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.warn("Client-side silence check failed or not supported, proceeding with upload.", err);
     }
+    
+    const durationSeconds = (Date.now() - recordingStartTime) / 1000;
 
     const formData = new FormData();
     formData.append('audio', audioBlob, 'recording.webm');
+    formData.append('durationSeconds', durationSeconds.toString());
+    
+    const priorHistory = sessionResults.map(r => ({ questionText: r.questionText, transcript: r.transcript }));
+    formData.append('priorHistory', JSON.stringify(priorHistory));
     
     // Always pass the current question text so the backend doesn't need to look it up 
     // (which fails for dynamically generated questions)
     formData.append('questionText', questionTextEl.textContent);
     formData.append('isFollowUp', isFollowUpPhase.toString());
+    formData.append('persona', selectedPersona);
 
     try {
       const response = await fetch('/api/interview/answer', {
@@ -310,7 +344,14 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // Update UI with response
       transcriptDisplay.textContent = `"${data.transcript}"`;
-      
+
+      if (data.scorecardNote && data.scorecardNote.trim() !== '') {
+        scorecardNoteText.textContent = data.scorecardNote;
+        scorecardNoteContainer.style.display = 'block';
+      } else {
+        scorecardNoteContainer.style.display = 'none';
+      }
+
       const specPct = Math.round((data.specificityScore || 0) * 100);
       specificityBar.style.width = `${specPct}%`;
       specificityLabel.textContent = `${specPct}%`;
@@ -323,15 +364,44 @@ document.addEventListener('DOMContentLoaded', () => {
       structureBar.style.width = `${structPct}%`;
       structureLabel.textContent = `${structPct}%`;
 
+      wpmLabel.textContent = data.wpm || 0;
+      paceLabelText.textContent = data.paceLabel || 'optimal';
+      
+      fillerCountLabel.textContent = data.fillerCount || 0;
+      fillerRateLabel.textContent = data.fillerRate || 0;
+      fillerLabelText.textContent = data.fillerLabel || 'clean';
+
+      // Basic color hints
+      const paceColor = data.paceLabel === 'optimal' ? 'var(--primary-color)' : '#d97706';
+      wpmLabel.parentElement.style.color = paceColor;
+      paceLabelText.style.color = paceColor;
+
+      const fillerColor = data.fillerLabel === 'clean' ? 'var(--primary-color)' : (data.fillerLabel === 'noticeable' ? '#d97706' : '#dc2626');
+      fillerCountLabel.parentElement.style.color = fillerColor;
+      fillerRateLabel.parentElement.style.color = fillerColor;
+      fillerLabelText.style.color = fillerColor;
+
       // Save to session results
       sessionResults.push({
         category: questions[currentQuestionIndex].category,
+        questionText: questionTextEl.textContent,
         isFollowUp: isFollowUpPhase,
         transcript: data.transcript,
         specPct,
         relPct,
-        structPct
+        structPct,
+        wpm: data.wpm || 0,
+        fillerRate: data.fillerRate || 0
       });
+      
+      // Render alignment
+      if (data.alignmentLabel) {
+        alignmentLabelText.textContent = data.alignmentLabel;
+        alignmentExplanationText.textContent = data.alignmentExplanation;
+        alignmentContainer.style.display = 'block';
+      } else {
+        alignmentContainer.style.display = 'none';
+      }
       
       feedbackList.innerHTML = '';
       if (data.feedback && Array.isArray(data.feedback)) {
@@ -350,15 +420,46 @@ document.addEventListener('DOMContentLoaded', () => {
         rewriteSection.style.display = 'none';
       }
 
-      if (data.orchestratorReasoning) {
+      if (data.contradictionFlag && data.contradictionNote) {
+        contradictionText.textContent = data.contradictionNote;
+        contradictionAlert.style.display = 'block';
+      } else {
+        contradictionAlert.style.display = 'none';
+      }
+
+      if (data.orchestratorReasoning || data.groundingPassed !== undefined || data.contradictionFlag !== undefined) {
         agentTraceSection.style.display = 'block';
         agentTraceSection.removeAttribute('open');
-        const firedAgents = ['EvaluatorAgent', 'CoachAgent'];
-        if (data.askFollowUp) {
-          firedAgents.push('InterviewerAgent');
+        
+        if (data.orchestratorReasoning) {
+          const firedAgents = ['EvaluatorAgent', 'CoachAgent'];
+          if (data.askFollowUp) {
+            firedAgents.push('InterviewerAgent');
+          }
+          agentFiredList.innerHTML = `<strong>Agents Fired:</strong> ${firedAgents.join(', ')}`;
+          agentReasoningText.innerHTML = `<strong>Reasoning:</strong> ${data.orchestratorReasoning}`;
         }
-        agentFiredList.innerHTML = `<strong>Agents Fired:</strong> ${firedAgents.join(', ')}`;
-        agentReasoningText.innerHTML = `<strong>Reasoning:</strong> ${data.orchestratorReasoning}`;
+
+        if (data.groundingPassed !== undefined) {
+          if (data.groundingPassed) {
+            groundingTraceText.innerHTML = `<strong>Grounding check:</strong> passed`;
+            groundingTraceText.style.color = 'inherit';
+          } else {
+            const claims = data.unsupportedClaims || [];
+            groundingTraceText.innerHTML = `<strong>Grounding check:</strong> flagged unsupported claims - [${claims.join(', ')}]`;
+            groundingTraceText.style.color = '#d97706'; // orange warning color
+          }
+          groundingTraceText.style.display = 'block';
+        } else {
+          groundingTraceText.style.display = 'none';
+        }
+
+        if (data.contradictionFlag !== undefined) {
+          contradictionTraceText.innerHTML = `<strong>Contradiction check:</strong> ${data.contradictionFlag ? `<span style="color: #dc2626;">flagged (${data.contradictionNote})</span>` : 'passed'}`;
+          contradictionTraceText.style.display = 'block';
+        } else {
+          contradictionTraceText.style.display = 'none';
+        }
       } else {
         agentTraceSection.style.display = 'none';
       }
@@ -401,14 +502,20 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (sessionResults.length === 0) return;
 
-    let totalSpec = 0, totalRel = 0, totalStruct = 0;
-    
     perQuestionList.innerHTML = '';
 
-    sessionResults.forEach((result, idx) => {
-      totalSpec += result.specPct;
-      totalRel += result.relPct;
-      totalStruct += result.structPct;
+    let totalSpec = 0;
+    let totalRel = 0;
+    let totalStruct = 0;
+    let totalWpm = 0;
+    let totalFillerRate = 0;
+
+    sessionResults.forEach((r, idx) => {
+      totalSpec += r.specPct;
+      totalRel += r.relPct;
+      totalStruct += r.structPct;
+      totalWpm += r.wpm;
+      totalFillerRate += r.fillerRate;
 
       const item = document.createElement('div');
       item.style.border = '1px solid var(--border-color)';
@@ -416,14 +523,14 @@ document.addEventListener('DOMContentLoaded', () => {
       item.style.borderRadius = '8px';
       item.style.background = 'var(--surface-color)';
       
-      const title = result.isFollowUp ? `${result.category} (Follow-up)` : result.category;
+      const title = r.isFollowUp ? `${r.category} (Follow-up)` : r.category;
       
       item.innerHTML = `
         <div style="font-weight: 600; margin-bottom: 0.5rem;">${idx + 1}. ${title}</div>
         <div style="display: flex; gap: 1rem; font-size: 0.9rem; color: var(--muted-text);">
-          <span>Spec: ${result.specPct}%</span>
-          <span>Rel: ${result.relPct}%</span>
-          <span>STAR: ${result.structPct}%</span>
+          <span>Spec: ${r.specPct}%</span>
+          <span>Rel: ${r.relPct}%</span>
+          <span>STAR: ${r.structPct}%</span>
         </div>
       `;
       perQuestionList.appendChild(item);
@@ -432,6 +539,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const avgSpec = Math.round(totalSpec / sessionResults.length);
     const avgRel = Math.round(totalRel / sessionResults.length);
     const avgStruct = Math.round(totalStruct / sessionResults.length);
+    const avgWpm = Math.round(totalWpm / sessionResults.length);
+    const avgFillerRate = Math.round(totalFillerRate / sessionResults.length);
 
     avgSpecBar.style.width = `${avgSpec}%`;
     avgSpecLabel.textContent = `${avgSpec}%`;
@@ -460,19 +569,100 @@ document.addEventListener('DOMContentLoaded', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionResults })
     })
-    .then(res => {
-      if (!res.ok) throw new Error("Summary failed");
-      return res.json();
-    })
-    .then(data => {
-      if (data && data.summary) {
-        aiSummaryText.textContent = data.summary;
+    .then(res => res.json())
+    .then(result => {
+      if(result.summary) {
+        aiSummaryText.textContent = result.summary;
         aiSummarySection.style.display = 'block';
       }
     })
     .catch(err => {
-      console.warn("AI Summary stretch goal failed gracefully:", err);
+      console.error('Failed to get AI summary', err);
     });
+  }
+
+  downloadCardBtn.addEventListener('click', () => {
+    generateAndDownloadShareableCard();
+  });
+
+  function generateAndDownloadShareableCard() {
+    const ctx = shareCanvas.getContext('2d');
+    const width = shareCanvas.width;
+    const height = shareCanvas.height;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Background
+    ctx.fillStyle = '#1e1b4b'; // Dark indigo background
+    ctx.fillRect(0, 0, width, height);
+
+    // Header
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 40px "Inter", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Interview Practice Results', width / 2, 80);
+
+    // Persona
+    const personaLabel = personaSelector.options[personaSelector.selectedIndex].text;
+    ctx.font = '500 24px "Inter", sans-serif';
+    ctx.fillStyle = '#a5b4fc';
+    ctx.fillText(`Persona: ${personaLabel}`, width / 2, 130);
+
+    // Decorative line
+    ctx.strokeStyle = '#4f46e5';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(100, 160);
+    ctx.lineTo(width - 100, 160);
+    ctx.stroke();
+
+    // Stats Grid
+    const overallScore = Math.round(sessionResults.reduce((acc, r) => acc + (r.specPct + r.relPct + r.structPct)/3, 0) / sessionResults.length);
+    const weakestArea = document.getElementById('weakestAreaLabel').textContent.replace('Focus Area: ', '').split(' was')[0];
+    const alignmentText = document.getElementById('overallAlignmentLabelText').textContent;
+
+    // Box 1: Overall Score
+    drawStatBox(ctx, width/2 - 170, 220, 150, 150, 'Overall Score', `${overallScore}%`, overallScore >= 80 ? '#22c55e' : (overallScore >= 60 ? '#eab308' : '#ef4444'));
+
+    // Box 2: Questions Answered
+    drawStatBox(ctx, width/2 + 20, 220, 150, 150, 'Questions', `${sessionResults.length}`, '#6366f1');
+
+    // Box 3: Weakest Area
+    drawStatBox(ctx, width/2 - 250, 410, 500, 120, 'Needs Focus', weakestArea, '#f43f5e');
+
+    // Box 4: Alignment
+    drawStatBox(ctx, width/2 - 250, 570, 500, 120, 'Delivery vs Content', alignmentText, '#0ea5e9');
+
+    // Footer
+    ctx.font = '400 20px "Inter", sans-serif';
+    ctx.fillStyle = '#6366f1';
+    ctx.fillText('Generated by Adk Interview Coach', width / 2, 850);
+
+    // Download
+    const dataUrl = shareCanvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = `interview-results-${new Date().toISOString().split('T')[0]}.png`;
+    link.href = dataUrl;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  function drawStatBox(ctx, x, y, w, h, title, value, color) {
+    ctx.fillStyle = '#312e81';
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 16);
+    ctx.fill();
+
+    ctx.fillStyle = color;
+    ctx.font = '600 18px "Inter", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(title.toUpperCase(), x + w/2, y + 40);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold ' + (h > 120 ? '48px' : '36px') + ' "Inter", sans-serif';
+    ctx.fillText(value, x + w/2, y + h/2 + 25);
   }
 
   practiceAgainBtn.addEventListener('click', () => {

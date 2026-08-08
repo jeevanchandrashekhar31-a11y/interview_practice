@@ -59,7 +59,7 @@ Respond with ONLY valid JSON matching this schema:
   }
 }
 
-export async function evaluateAnswer(audioBuffer, mimeType, questionText) {
+export async function evaluateAnswer(audioBuffer, mimeType, questionText, priorHistory = [], rubric = 'Focus on standard STAR methodology (Situation, Task, Action, Result). Evaluate clarity, standard professional competency, and structured storytelling.') {
   if (!genAI) {
     throw new Error("Gemini API not configured properly.");
   }
@@ -77,6 +77,12 @@ export async function evaluateAnswer(audioBuffer, mimeType, questionText) {
 The interview question asked is:
 "${questionText}"
 
+Prior History:
+${JSON.stringify(priorHistory)}
+
+Persona / Rubric Focus:
+${rubric}
+
 Listen to the provided audio answer and perform the following tasks:
 1. Transcribe the answer accurately.
 2. If the audio contains no discernible speech or is completely silent, you must return transcript: "", status: "error", and do not invent any answer content under any circumstances.
@@ -84,7 +90,9 @@ Listen to the provided audio answer and perform the following tasks:
 4. Score the answer from 0.0 to 1.0 on how directly it answers the actual question asked (relevance).
 5. Score the answer from 0.0 to 1.0 on structure (whether Situation/Task/Action/Result are identifiably present).
 6. Give 2-3 short, specific, actionable feedback points. Do not give generic encouragement. Focus on exactly what the candidate should improve or what specific thing they did exceptionally well.
-7. Rewrite the candidate's answer in a clear STAR structure (Situation, Task, Action, Result), in 3-5 sentences, from the first-person perspective, as if the candidate had said it that way. CRITICAL: Use ONLY facts, numbers, and experiences the candidate actually mentioned. Do not invent any new details.
+7. Write a "scorecardNote" — a 1-2 sentence note (under 30 words) in the voice of an interviewer's internal scorecard comment, specific to the actual answer (not generic).
+8. Rewrite the candidate's answer in a clear STAR structure (Situation, Task, Action, Result), in 3-5 sentences, from the first-person perspective, as if the candidate had said it that way. CRITICAL: Use ONLY facts, numbers, and experiences the candidate actually mentioned. Do not invent any new details.
+9. Compare this answer to the prior answers given in Prior History. If there is a factual or characterological contradiction, set contradictionFlag=true and write a contradictionNote phrasing the tension neutrally. If no contradiction, set contradictionFlag=false and contradictionNote=null.
 
 Respond with ONLY valid JSON matching this schema:
 {
@@ -93,8 +101,11 @@ Respond with ONLY valid JSON matching this schema:
   "relevanceScore": number,
   "structureScore": number,
   "feedback": ["string", "string"],
+  "scorecardNote": "string",
   "modelRewrite": "string",
-  "status": "success" | "error"
+  "status": "success" | "error",
+  "contradictionFlag": boolean,
+  "contradictionNote": "string" | null
 }`;
 
   const audioPart = {
@@ -131,7 +142,7 @@ Respond with ONLY valid JSON matching this schema:
   }
 }
 
-export async function generateFollowUp(transcript, originalQuestion) {
+export async function generateFollowUp(transcript, originalQuestion, contradictionNote = null) {
   if (!genAI) {
     throw new Error("Gemini API not configured properly.");
   }
@@ -149,7 +160,7 @@ export async function generateFollowUp(transcript, originalQuestion) {
 Their answer was:
 "${transcript}"
 
-Your task is to generate exactly one natural follow-up question that probes deeper into something specific the candidate mentioned (a claim, a number, a named tool, a decision they made). Make it conversational and relevant.
+${contradictionNote ? `The candidate's answer contradicted a previous answer: "${contradictionNote}". Your task is to generate exactly one natural follow-up question that addresses this contradiction. Phrase the follow-up neutrally, naming the specific tension between the answers.` : `Your task is to generate exactly one natural follow-up question that probes deeper into something specific the candidate mentioned (a claim, a number, a named tool, a decision they made). Make it conversational and relevant.`}
 
 Respond with ONLY valid JSON matching this schema:
 {
@@ -168,7 +179,7 @@ Respond with ONLY valid JSON matching this schema:
 }
 
 
-export async function generateQuestions(jobDescription) {
+export async function generateQuestions(jobDescription, rubric = 'Focus on standard STAR methodology (Situation, Task, Action, Result). Evaluate clarity, standard professional competency, and structured storytelling.') {
   if (!genAI) {
     throw new Error("Gemini API not configured properly.");
   }
@@ -183,7 +194,10 @@ export async function generateQuestions(jobDescription) {
   const prompt = `You are an expert technical recruiter preparing an interview for the following job description:
 "${jobDescription}"
 
-Your task is to generate exactly 6 interview questions tailored to the skills and role in the job description. The 6 questions must strictly follow this order of categories:
+Your task is to generate exactly 6 interview questions tailored to the skills and role in the job description, and calibrated using this Persona / Rubric Focus:
+"${rubric}"
+
+The 6 questions must strictly follow this order of categories:
 1. "intro"
 2. "strength"
 3. "weakness"

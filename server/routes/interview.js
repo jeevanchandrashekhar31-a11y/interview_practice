@@ -1,6 +1,9 @@
 import express from 'express';
 import multer from 'multer';
 import { evaluateAnswer, generateQuestions, generateSessionSummary, transcribeAudio, generateFollowUp } from '../services/gemini.js';
+import { computeDeliveryMetrics, computeAlignment } from '../services/metrics.js';
+import { checkGrounding } from '../services/grounding.js';
+import { PERSONA_RUBRICS } from '../config/personas.js';
 import questions from '../config/questions.js';
 import { InMemoryRunner } from '@google/adk';
 import { orchestratorAgent } from '../agents/interview_agents.js';
@@ -20,6 +23,18 @@ router.post('/answer', upload.single('audio'), async (req, res, next) => {
     const questionId = parseInt(req.body.questionId, 10);
     let questionText = req.body.questionText;
     const isFollowUp = req.body.isFollowUp === 'true';
+    const durationSeconds = parseFloat(req.body.durationSeconds) || 0;
+    const persona = req.body.persona || 'generic';
+    const rubric = PERSONA_RUBRICS[persona] || PERSONA_RUBRICS['generic'];
+    
+    let priorHistory = [];
+    try {
+      if (req.body.priorHistory) {
+        priorHistory = JSON.parse(req.body.priorHistory);
+      }
+    } catch (e) {
+      console.error("Failed to parse priorHistory", e);
+    }
 
     if (!audioFile) {
       return res.status(400).json({ success: false, error: "No audio file provided." });
@@ -61,7 +76,7 @@ router.post('/answer', upload.single('audio'), async (req, res, next) => {
         const runner = new InMemoryRunner({ agent: orchestratorAgent, appName: 'interview-app' });
         const stream = runner.runEphemeral({
           userId: 'user',
-          stateDelta: { transcript: transcriptionResult.transcript, questionText, isFollowUp },
+          stateDelta: { transcript: transcriptionResult.transcript, questionText, isFollowUp, priorHistory, rubric },
           newMessage: { parts: [{ text: "Please evaluate the candidate's answer." }] }
         });
 
@@ -98,11 +113,18 @@ router.post('/answer', upload.single('audio'), async (req, res, next) => {
           throw new Error("Sequential sub-agents failed to evaluate the transcript.");
         }
 
+        const metrics = computeDeliveryMetrics(transcriptionResult.transcript, durationSeconds);
+        const alignment = computeAlignment(metrics.wpm, metrics.fillerRate, evaluatorData.specificityScore, evaluatorData.structureScore);
+        const grounding = checkGrounding(transcriptionResult.transcript, coachData.modelRewrite);
+
         const finalData = {
           transcript: transcriptionResult.transcript,
           status: "success",
           ...evaluatorData,
           ...coachData,
+          ...metrics,
+          ...alignment,
+          ...grounding,
           askFollowUp: !!(evaluatorData.followUpQuestion && evaluatorData.followUpQuestion.trim() !== ""),
           orchestratorReasoning: evaluatorData.orchestratorReasoning || "Merged agent decided follow up based on score.",
         };
@@ -117,7 +139,7 @@ router.post('/answer', upload.single('audio'), async (req, res, next) => {
     }
 
     console.log("Handling request via Legacy Fallback Path");
-    const evaluationResult = await evaluateAnswer(audioFile.buffer, audioFile.mimetype, questionText);
+    const evaluationResult = await evaluateAnswer(audioFile.buffer, audioFile.mimetype, questionText, priorHistory, rubric);
 
     // If Gemini flags it as an error (e.g. silent/no speech)
     if (evaluationResult.status === 'error' || !evaluationResult.transcript || evaluationResult.transcript.trim() === '') {
@@ -137,7 +159,11 @@ router.post('/answer', upload.single('audio'), async (req, res, next) => {
       const r = evaluationResult.relevanceScore;
       const st = evaluationResult.structureScore;
 
-      if (s >= 0.8 && r >= 0.8 && st >= 0.8) {
+      if (evaluationResult.contradictionFlag) {
+        // Priority 0: Contradiction forces a follow-up
+        askFollowUp = true;
+        orchestratorReasoning = "Fallback path flagged a contradiction and forced a follow-up.";
+      } else if (s >= 0.8 && r >= 0.8 && st >= 0.8) {
         // Priority 1: Strong answer, default no follow-up
         askFollowUp = false;
       } else if (s < 0.6 || r < 0.6 || st < 0.6) {
@@ -153,9 +179,11 @@ router.post('/answer', upload.single('audio'), async (req, res, next) => {
       
       if (askFollowUp) {
         try {
-          const followUpData = await generateFollowUp(evaluationResult.transcript, questionText);
+          const followUpData = await generateFollowUp(evaluationResult.transcript, questionText, evaluationResult.contradictionNote);
           followUpQuestion = followUpData.followUpQuestion || followUpData; // Depending on format
-          orchestratorReasoning = "Fallback path generated follow-up based on legacy score thresholds.";
+          if (!evaluationResult.contradictionFlag) {
+            orchestratorReasoning = "Fallback path generated follow-up based on legacy score thresholds.";
+          }
         } catch(e) {
           console.error("Fallback follow-up generation failed", e);
           askFollowUp = false;
@@ -163,11 +191,18 @@ router.post('/answer', upload.single('audio'), async (req, res, next) => {
       }
     }
 
+    const metrics = computeDeliveryMetrics(evaluationResult.transcript, durationSeconds);
+    const alignment = computeAlignment(metrics.wpm, metrics.fillerRate, evaluationResult.specificityScore, evaluationResult.structureScore);
+    const grounding = checkGrounding(evaluationResult.transcript, evaluationResult.modelRewrite);
+
     // Success response
     return res.json({
       success: true,
       data: {
         ...evaluationResult,
+        ...metrics,
+        ...alignment,
+        ...grounding,
         askFollowUp,
         followUpQuestion,
         orchestratorReasoning
@@ -211,13 +246,14 @@ router.post('/followup', async (req, res, next) => {
 
 // POST /api/interview/generate-questions - Generate questions based on job description
 router.post('/generate-questions', async (req, res) => {
-  const { jobDescription } = req.body;
-  if (!jobDescription || jobDescription.trim() === '') {
-    return res.json(questions);
-  }
-
   try {
-    const generated = await generateQuestions(jobDescription);
+    const { jobDescription, persona } = req.body;
+    if (!jobDescription || jobDescription.trim() === '') {
+      return res.json(questions);
+    }
+    
+    const rubric = PERSONA_RUBRICS[persona] || PERSONA_RUBRICS['generic'];
+    const generated = await generateQuestions(jobDescription, rubric);
     if (Array.isArray(generated) && generated.length > 0) {
       return res.json(generated);
     }
