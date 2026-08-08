@@ -1,113 +1,41 @@
-# Interview Practice — Architecture
+# System Architecture Overview
 
-## System Diagram
+This document outlines the architecture of the AI-Powered Interview Coach application, separated into three logical layers: the Client Layer, Application & Orchestration Layer, and the Google AI / Cloud Services Layer.
 
-```mermaid
-flowchart TD
-    subgraph Setup["Setup Phase"]
-        JD[User pastes Job Description] -->|optional| GQ[POST /generate-questions]
-        GQ --> GEM1[Gemini: tailor 6 questions to JD]
-        NOJD[User skips JD] --> STATIC[Static question set: questions.js]
-    end
+## Layer 1: Client & User Experience
+The frontend is built for simplicity and high performance, executing exclusively in the browser.
 
-    GEM1 --> QCARD
-    STATIC --> QCARD
+*   **Browser Client (Interview UI):** A Vanilla HTML/CSS/JS frontend.
+*   **Audio Capture:** Implements the `MediaRecorder API` to record user speech. 
+*   **Silence Detection:** An initial client-side guardrail that calculates the Root Mean Square (RMS) of audio buffers, immediately rejecting empty or excessively quiet recordings (`rms < 0.01`) to save backend bandwidth.
+*   **Scorecard Engine:** An HTML5 Canvas implementation that takes the final aggregated session data and draws a shareable graphical scorecard, triggering a local PNG download without needing a backend rendering service.
 
-    subgraph ClientFlow["Frontend — Vanilla JS"]
-        QCARD[Question Card + progress indicator] --> REC[Record via MediaRecorder]
-        REC --> RMS{RMS silence check}
-        RMS -->|too quiet| REC
-        RMS -->|valid audio| UPLOAD[Upload FormData: audio blob + questionId/text + isFollowUp]
-    end
+## Layer 2: Application & Orchestration (Node.js)
+The middle tier is a completely stateless Express.js server. Because no session data is stored on disk or in a database, the system avoids synchronization issues and scales easily.
 
-    subgraph Backend["Backend — Node/Express"]
-        UPLOAD --> ROUTE[POST /api/interview/answer]
-        ROUTE --> MULTER[Multer memory storage, 5KB min size check]
-        MULTER --> TRANSCRIBE[Gemini multimodal: audio -> transcript]
-        TRANSCRIBE --> FLAG{USE_ADK_ORCHESTRATOR}
-    end
+*   **Interview Backend Service:** An Express.js router that manages raw audio buffering using `Multer` (in-memory) and acts as the gateway to the AI orchestrator. It receives the `priorHistory` from the client on every request to maintain context.
+*   **Google Antigravity (ADK) Orchestrator:** The core agent framework. It runs a `SequentialAgent` pipeline via an `InMemoryRunner`, handling the flow of data between the LLM agents.
+*   **Evaluator Agent (Agent 1):** The first agent in the ADK pipeline. It performs strict numerical scoring (Specificity, Relevance, Structure), generates an interviewer "scorecard note", and executes the **Contradiction Engine** to cross-reference current answers against past statements. Based on these outputs, it dynamically decides if a follow-up question is warranted.
+*   **Coach Agent (Agent 2):** The second agent in the pipeline. It takes the original transcript and rewrites it into a perfect STAR (Situation, Task, Action, Result) format in the first person.
+*   **Deterministic Rules Engine:** A side-car layer of pure Node.js logic that executes post-processing on the LLM outputs:
+    *   *Delivery Metrics:* Calculates Words-Per-Minute (WPM) and filler word ratios.
+    *   *Grounding Checker:* Deterministically extracts proper nouns and standalone numbers from the Coach Agent's rewrite and ensures they exist in the raw transcript, flagging any unsupported claims to prevent AI hallucination.
 
-    subgraph Primary["Primary Path — Google ADK Multi-Agent"]
-        FLAG -->|true| SEQ[ADK SequentialAgent]
-        SEQ --> EVAL[EvaluatorAgent]
-        EVAL -->|scores + feedback| COACH[CoachAgent]
-        EVAL -->|priority-tiered decision| DECIDE["askFollowUp, followUpQuestion,\nreasoning"]
-        COACH --> REWRITE[STAR model rewrite,\nfacts-only constraint]
-    end
+## Layer 3: Google AI & Cloud Services
+The foundation layer providing the actual machine learning inference capabilities.
 
-    subgraph Fallback["Fallback Path — Direct Gemini calls"]
-        FLAG -->|false| EVALFN[evaluateAnswer function]
-        EVALFN --> THRESH{"3-tier threshold logic\n(mirrors ADK priority rules)"}
-        THRESH -->|triggered| FOLLOWFN[generateFollowUp function]
-    end
+*   **Gemini Speech-to-Text:** Serves as the initial transcription layer, converting the WebM audio buffers from the backend into raw text transcripts before agent processing begins.
+*   **Gemini 1.5 Flash-Lite:** The primary Large Language Model (LLM) powering both the Evaluator and Coach agents. It was chosen for its optimal balance of ultra-low latency (~1.5s inference) and cost-efficiency.
+*   **Direct Gemini API (Fallback Circuit Breaker):** A resilient legacy path. If the ADK Orchestrator fails or times out, the backend bypasses the agent pipeline and calls the standard Gemini API SDK directly to ensure the user still receives baseline feedback.
 
-    DECIDE --> RESPONSE
-    REWRITE --> RESPONSE
-    THRESH --> RESPONSE
-    FOLLOWFN --> RESPONSE
-    RESPONSE[Combined JSON response] --> FEEDBACK[Feedback Card:\nscores, feedback, model rewrite, agent trace]
+---
 
-    FEEDBACK -->|askFollowUp true| CONTINUE[Continue button]
-    CONTINUE --> REC
-    FEEDBACK -->|last question complete| COMPLETE[Completion Card:\naverage scores, weakest area,\nper-question breakdown]
-```
-
-## Component Breakdown
-
-### 1. Frontend (`public/`)
-Vanilla HTML/CSS/JS — no framework. Handles question display, MediaRecorder-based audio
-capture, a client-side RMS silence check (via the Web Audio API's AnalyserNode) to avoid
-uploading empty recordings, and rendering of the AI response, including a live
-mic-driven waveform visualization during recording and a progress indicator across the
-session.
-
-### 2. Backend (`server/`)
-Express app. `server/routes/interview.js` handles question retrieval/generation and the
-core answer-submission endpoint. Audio is transcribed via Gemini's multimodal endpoint
-using the existing (pre-agent-refactor) transcription call — this step was deliberately
-kept outside the ADK migration, since it was already working and multimodal-verified,
-to minimize risk during the agent migration.
-
-### 3. Agent layer (`server/agents/`)
-Built on Google's Agent Development Kit (`@google/adk`, TypeScript). Originally
-designed as four separate agents (Evaluator, Coach, Interviewer, and an LLM-driven
-Orchestrator); refactored during development into a leaner two-agent
-`SequentialAgent` pipeline after discovering the routing-agent design added an extra
-paid inference call for a decision that could live inside the Evaluator's own output:
-
-- **EvaluatorAgent** — scores specificity, relevance, and structure; generates
-  feedback; and makes the follow-up decision itself using an explicit three-tier
-  priority rule (strong answers default to no follow-up; any low score triggers one;
-  mid-range scores trigger one only if a specific claim was left unexplained).
-- **CoachAgent** — rewrites the answer in STAR structure, constrained to only use
-  facts present in the original transcript.
-
-### 4. Resilience layer
-A `USE_ADK_ORCHESTRATOR` environment flag switches between the ADK pipeline and a
-fully independent fallback implementation using direct Gemini calls through the
-pre-existing `server/services/gemini.js` functions. The fallback replicates the same
-response schema and the same tuned decision thresholds (with one intentional
-simplification: the ADK path's semantic "is there an unexplained gap" check in the
-mid-range score band isn't reproducible in plain conditional logic, so the fallback
-defaults conservatively to no follow-up in that narrow band). This was built and
-explicitly verified end-to-end, independent of the primary path, so the app degrades
-gracefully rather than failing outright if the agent layer misbehaves.
-
-### 5. Deployment
-Dockerized, deployed on Render. Environment variables (`GOOGLE_API_KEY`,
-`USE_ADK_ORCHESTRATOR`) are set at the platform level, not via a committed `.env` file.
-
-## Key Design Decisions
-- **Audio transcription was kept outside the ADK migration.** Multimodal input
-  handling inside ADK TypeScript was an unverified surface at the time of migration;
-  isolating that risk kept a working, previously-verified pipeline stable while the
-  agent layer was built and debugged.
-- **The Orchestrator was collapsed from a separate LLM-driven routing agent into
-  logic inside EvaluatorAgent.** A dedicated routing agent added a full extra
-  inference call per turn for a decision the Evaluator already has enough context to
-  make directly — reducing API calls per turn while keeping the decision genuinely
-  content-aware rather than script-driven.
-- **The fallback path is a first-class requirement, not an afterthought.** Given a
-  live, in-person presentation, a single point of failure in a newly-integrated agent
-  framework was treated as an unacceptable risk; the fallback was built, and verified
-  independently, before deployment.
+## Data Flow
+1. **Stream Audio:** The Browser Client captures and streams a WebM audio buffer to the Interview Backend Service.
+2. **Transcription:** The Backend passes the buffer to Gemini Speech-to-Text, returning a transcript.
+3. **Orchestrate Pipeline:** The Backend injects the transcript, question text, and prior history into the ADK Orchestrator.
+4. **Step 1 - Evaluate:** The Evaluator Agent runs inference against Gemini 1.5 Flash-Lite to generate scores and detect contradictions.
+5. **Step 2 - Coach Rewrite:** The Coach Agent runs inference to rewrite the answer.
+6. **Grounding & WPM Check:** The raw outputs pass through the Deterministic Rules Engine for pacing analysis and hallucination checks.
+7. **Final Payload:** The consolidated, validated JSON payload is returned to the Browser Client for UI rendering.
+*(If Step 3 fails, the system routes directly to the Fallback Circuit Breaker in Step 2).*
