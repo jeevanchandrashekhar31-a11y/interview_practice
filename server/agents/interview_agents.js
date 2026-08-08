@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 export const evaluatorAgent = new LlmAgent({
   name: 'EvaluatorAgent',
-  model: 'gemini-3.1-pro',
+  model: 'gemini-pro-latest',
   description: 'Evaluates the candidate\'s answer on specificity, relevance, and structure.',
   inputSchema: z.object({
     transcript: z.string(),
@@ -54,7 +54,7 @@ Listen to the provided transcript and perform the following tasks:
 
 export const coachAgent = new LlmAgent({
   name: 'CoachAgent',
-  model: 'gemini-3.1-flash',
+  model: 'gemini-3.5-flash',
   description: 'Rewrites the candidate\'s answer into a stronger STAR structure.',
   inputSchema: z.object({
     transcript: z.string(),
