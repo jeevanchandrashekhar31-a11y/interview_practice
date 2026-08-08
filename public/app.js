@@ -139,18 +139,23 @@ document.addEventListener('DOMContentLoaded', () => {
     currentQuestionIndex = index;
     const q = questions[index];
     
-    // Reset state for new base question
-    isFollowUpPhase = false;
-    currentTranscript = "";
-    
-    questionCategoryEl.textContent = `Category: ${q.category}`;
-    questionTextEl.textContent = q.text;
-    followUpBadge.style.display = 'none';
-    
-    // Update Progress
+    // Update Progress and text that applies to both screens
     const total = questions.length;
     progressText.textContent = `Question ${index + 1} of ${total}`;
     progressBar.style.width = `${((index + 1) / total) * 100}%`;
+    questionCategoryEl.textContent = `Category: ${q.category}`;
+    
+    // Check if we have cached feedback for this question
+    if (feedbackCache[index]) {
+      renderFeedback(feedbackCache[index], true);
+      return;
+    }
+    
+    // Reset state for new base question recording screen
+    isFollowUpPhase = false;
+    currentTranscript = "";
+    questionTextEl.textContent = q.text;
+    followUpBadge.style.display = 'none';
     
     if (index > 0) {
       prevBtn.style.display = 'inline-block';
@@ -158,7 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
       prevBtn.style.display = 'none';
     }
     
-    // Reset UI
+    // Reset UI for recording
     feedbackCard.style.display = 'none';
     waveformCanvas.style.display = 'none';
     statusEl.textContent = "Ready";
