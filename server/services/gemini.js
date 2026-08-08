@@ -194,23 +194,15 @@ export async function generateQuestions(jobDescription, rubric = 'Focus on stand
   const prompt = `You are an expert technical recruiter preparing an interview for the following job description:
 "${jobDescription}"
 
-Your task is to generate exactly 6 interview questions tailored to the skills and role in the job description, and calibrated using this Persona / Rubric Focus:
+Your task is to generate exactly 6 highly specific, technical, or role-based interview questions tailored perfectly to the skills, requirements, and day-to-day realities of the job description provided. Do not use generic HR questions unless the job description implies it. Calibrate the questions using this Persona / Rubric Focus:
 "${rubric}"
-
-The 6 questions must strictly follow this order of categories:
-1. "intro"
-2. "strength"
-3. "weakness"
-4. "challenge"
-5. "motivation"
-6. "behavioral"
 
 Respond with ONLY a valid JSON array of objects, with no markdown formatting. Each object must exactly match this schema:
 [
   {
     "id": number (e.g. 1 to 6),
-    "text": "string (the interview question)",
-    "category": "string (exactly one of: intro, strength, weakness, challenge, motivation, behavioral)"
+    "text": "string (the highly tailored interview question)",
+    "category": "string (a short 1-2 word category you invent based on the question topic, e.g. 'System Design', 'Leadership', 'Debugging')"
   }
 ]`;
 
