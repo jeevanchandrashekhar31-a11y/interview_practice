@@ -317,6 +317,177 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  
+  function renderFeedback(data, isCached = false) {
+    if (!isFollowUpPhase && !isCached) {
+      currentTranscript = data.transcript;
+    }
+    
+    transcriptDisplay.textContent = '"' + data.transcript + '"';
+
+    if (data.scorecardNote && data.scorecardNote.trim() !== '') {
+      scorecardNoteText.textContent = data.scorecardNote;
+      scorecardNoteContainer.style.display = 'block';
+    } else {
+      scorecardNoteContainer.style.display = 'none';
+    }
+
+    const specPct = Math.round((data.specificityScore || 0) * 100);
+    specificityBar.style.width = `${specPct}%`;
+    specificityLabel.textContent = `${specPct}%`;
+    
+    const relPct = Math.round((data.relevanceScore || 0) * 100);
+    relevanceBar.style.width = `${relPct}%`;
+    relevanceLabel.textContent = `${relPct}%`;
+    
+    const structPct = Math.round((data.structureScore || 0) * 100);
+    structureBar.style.width = `${structPct}%`;
+    structureLabel.textContent = `${structPct}%`;
+
+    wpmLabel.textContent = data.wpm || 0;
+    paceLabelText.textContent = data.paceLabel || 'optimal';
+    
+    fillerCountLabel.textContent = data.fillerCount || 0;
+    fillerRateLabel.textContent = data.fillerRate || 0;
+    fillerLabelText.textContent = data.fillerLabel || 'clean';
+
+    const paceColor = data.paceLabel === 'optimal' ? 'var(--primary-color)' : '#d97706';
+    wpmLabel.parentElement.style.color = paceColor;
+    paceLabelText.style.color = paceColor;
+
+    const fillerColor = data.fillerLabel === 'clean' ? 'var(--primary-color)' : (data.fillerLabel === 'noticeable' ? '#d97706' : '#dc2626');
+    fillerCountLabel.parentElement.style.color = fillerColor;
+    fillerRateLabel.parentElement.style.color = fillerColor;
+    fillerLabelText.style.color = fillerColor;
+
+    if (!isCached) {
+      sessionResults.push({
+        category: questions[currentQuestionIndex].category,
+        questionText: questionTextEl.textContent,
+        isFollowUp: isFollowUpPhase,
+        transcript: data.transcript,
+        specPct,
+        relPct,
+        structPct,
+        wpm: data.wpm || 0,
+        fillerRate: data.fillerRate || 0
+      });
+      feedbackCache[currentQuestionIndex] = data;
+      feedbackCache[currentQuestionIndex]._cachedIsFollowUpPhase = isFollowUpPhase;
+      feedbackCache[currentQuestionIndex]._cachedCurrentTranscript = currentTranscript;
+      feedbackCache[currentQuestionIndex]._cachedQuestionText = questionTextEl.textContent;
+    } else {
+      isFollowUpPhase = data._cachedIsFollowUpPhase || false;
+      currentTranscript = data._cachedCurrentTranscript || '';
+      questionTextEl.textContent = data._cachedQuestionText || questions[currentQuestionIndex].text;
+    }
+    
+    if (data.alignmentLabel) {
+      alignmentLabelText.textContent = data.alignmentLabel;
+      alignmentExplanationText.textContent = data.alignmentExplanation;
+      alignmentContainer.style.display = 'block';
+    } else {
+      alignmentContainer.style.display = 'none';
+    }
+    
+    feedbackList.innerHTML = '';
+    if (data.feedback && Array.isArray(data.feedback)) {
+      data.feedback.forEach(point => {
+        const li = document.createElement('li');
+        li.textContent = point;
+        feedbackList.appendChild(li);
+      });
+    }
+
+    if (data.modelRewrite && data.modelRewrite.trim() !== '') {
+      rewriteText.textContent = data.modelRewrite;
+      rewriteSection.style.display = 'block';
+      rewriteSection.removeAttribute('open');
+    } else {
+      rewriteSection.style.display = 'none';
+    }
+
+    if (data.contradictionFlag && data.contradictionNote) {
+      contradictionText.textContent = data.contradictionNote;
+      contradictionAlert.style.display = 'block';
+    } else {
+      contradictionAlert.style.display = 'none';
+    }
+
+    if (data.orchestratorReasoning || data.groundingPassed !== undefined || data.contradictionFlag !== undefined) {
+      agentTraceSection.style.display = 'block';
+      agentTraceSection.removeAttribute('open');
+      
+      if (data.orchestratorReasoning) {
+        const firedAgents = ['EvaluatorAgent', 'CoachAgent'];
+        if (data.askFollowUp) {
+          firedAgents.push('InterviewerAgent');
+        }
+        agentFiredList.innerHTML = '<strong>Agents Fired:</strong> ' + firedAgents.join(', ');
+        agentReasoningText.innerHTML = '<strong>Reasoning:</strong> ' + data.orchestratorReasoning;
+      }
+
+      if (data.groundingPassed !== undefined) {
+        if (data.groundingPassed) {
+          groundingTraceText.innerHTML = '<strong>Grounding check:</strong> passed';
+          groundingTraceText.style.color = 'inherit';
+        } else {
+          const claims = data.unsupportedClaims || [];
+          groundingTraceText.innerHTML = '<strong>Grounding check:</strong> flagged unsupported claims - [' + claims.join(', ') + ']';
+          groundingTraceText.style.color = '#d97706';
+        }
+        groundingTraceText.style.display = 'block';
+      } else {
+        groundingTraceText.style.display = 'none';
+      }
+
+      if (data.contradictionFlag !== undefined) {
+        contradictionTraceText.innerHTML = '<strong>Contradiction check:</strong> ' + (data.contradictionFlag ? '<span style="color: #dc2626;">flagged (' + data.contradictionNote + ')</span>' : 'passed');
+        contradictionTraceText.style.display = 'block';
+      } else {
+        contradictionTraceText.style.display = 'none';
+      }
+    } else {
+      agentTraceSection.style.display = 'none';
+    }
+
+    if (data.askFollowUp && data.followUpQuestion) {
+      window.currentFollowUpQuestion = data.followUpQuestion;
+    } else {
+      window.currentFollowUpQuestion = '';
+    }
+
+    if (isCached) {
+      retryBtn.style.display = 'inline-block';
+      continueBtn.style.display = 'none';
+      nextBtn.style.display = 'inline-block';
+      
+      if (currentQuestionIndex > 0) {
+        feedbackPrevBtn.style.display = 'inline-block';
+      } else {
+        feedbackPrevBtn.style.display = 'none';
+      }
+    } else {
+      retryBtn.style.display = 'none';
+      feedbackPrevBtn.style.display = 'none';
+      
+      if (isFollowUpPhase) {
+        continueBtn.style.display = 'none';
+        nextBtn.style.display = 'inline-block';
+      } else {
+        if (data.askFollowUp === true) {
+          continueBtn.style.display = 'inline-block';
+          nextBtn.style.display = 'none';
+        } else {
+          continueBtn.style.display = 'none';
+          nextBtn.style.display = 'inline-block';
+        }
+      }
+    }
+
+    questionCard.style.display = 'none';
+    feedbackCard.style.display = 'block';
+  }
   async function handleStop() {
     const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
     
