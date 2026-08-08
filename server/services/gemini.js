@@ -12,7 +12,7 @@ export async function transcribeAudio(audioBuffer, mimeType, questionText) {
 
   // Using the requested model; to be swapped to gemini-3.5-flash later
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3.5-flash',
+    model: 'gemini-3.1-flash-lite',
     generationConfig: {
       responseMimeType: 'application/json'
     }
@@ -66,7 +66,7 @@ export async function evaluateAnswer(audioBuffer, mimeType, questionText, priorH
 
   // Using the requested model; to be swapped to gemini-3.5-flash later
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3.5-flash',
+    model: 'gemini-3.1-flash-lite',
     generationConfig: {
       responseMimeType: 'application/json'
     }
@@ -148,7 +148,7 @@ export async function generateFollowUp(transcript, originalQuestion, contradicti
   }
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3.5-flash',
+    model: 'gemini-3.1-flash-lite',
     generationConfig: {
       responseMimeType: 'application/json'
     }
@@ -185,7 +185,7 @@ export async function generateQuestions(jobDescription, rubric = 'Focus on stand
   }
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3.5-flash',
+    model: 'gemini-3.1-flash-lite',
     generationConfig: {
       responseMimeType: 'application/json'
     }
@@ -223,7 +223,7 @@ export async function generateSessionSummary(sessionResults) {
   }
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3.5-flash',
+    model: 'gemini-3.1-flash-lite',
     generationConfig: {
       responseMimeType: 'application/json'
     }
